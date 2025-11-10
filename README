@@ -1,0 +1,110 @@
+FireBeetle 2 ESP32-E IoT Logger Firmware
+
+This PlatformIO project contains the complete firmware for the IoT water quality logger as specified. It manages hourly wake cycles, sensor logging, local data buffering, and 4G data uploads.
+
+Hardware Notice: Gravity IO Shield (DFR0762)
+
+This firmware is configured to be used with the Gravity: IO Shield for FireBeetle 2 (SKU: DFR0762). All pin mappings in src/config.h and wiring.md correspond to the ports on this shield.
+
+CRITICAL VOLTAGE WARNING:
+The IO Shield has a VCC slide switch (3.3V / 5V). The FireBeetle 2 ESP32-E microcontroller is NOT 5V TOLERANT on its analog or digital pins.
+
+You MUST set this switch to 3.3V.
+
+If you set the switch to 5V, you will power the sensors with 5V, and they will output a 5V signal, which will permanently destroy the ESP32-E board.
+
+Project Structure
+
+platformio.ini: Defines the board, framework, and all library dependencies.
+
+src/main.cpp: The main entry point and logic controller. Manages the wake/log/upload/sleep state machine.
+
+src/config.h: All user configuration is here. Set pin mappings, APN, server URL, API key, and timing constants.
+
+src/sensors.cpp/h: Manages initialization and reading of all 7 sensors (pH, DO, EC, Turbidity, Temp, ORP, Leak).
+
+src/modem.cpp/h: Manages all AT commands for the A7670E module via the TinyGSM library. Handles GPS, GPRS connection, and HTTP POST requests.
+
+src/storage.cpp/h: Manages the LittleFS filesystem. Handles saving session data, reading files for upload, and maintaining the 24-hour rolling buffer.
+
+wiring.md: Contains the pin mapping table and wiring guide.
+
+example_payload.json: An example of the exact JSON payload sent to the server.
+
+Flashing Steps
+
+Install PlatformIO: Ensure you have Visual Studio Code with the PlatformIO IDE extension installed.
+
+Clone/Download: Get this project onto your computer.
+
+Open Project: In VS Code, go to File > Open Folder... and select the root of this project folder.
+
+Configure: Open src/config.h and fill in all (USER MUST CONFIGURE) sections:
+
+Your cellular apn, gprsUser, and gprsPass.
+
+Your server server, resource, port, and api_key_header.
+
+(Pin mappings are already set for the IO Shield).
+
+Build & Upload:
+
+Connect your FireBeetle 2 ESP32-E via USB.
+
+PlatformIO will automatically detect the library dependencies from platformio.ini and install them.
+
+Click the PlatformIO "Upload" button (arrow icon) in the bottom status bar.
+
+Configuration
+
+Modifying Intervals
+
+All timing is controlled in src/config.h:
+
+TIME_TO_SLEEP: Total sleep duration (default 3180 seconds, or 53 minutes). This is calculated as 3600s (1 hour) - 420s (7 min active window).
+
+LOGGING_WINDOW_DURATION_S: Duration for sensor sampling (default 180 seconds).
+
+UPLOAD_WINDOW_DURATION_S: Duration for data upload (default 240 seconds).
+
+SAMPLING_INTERVAL_S: Time between samples (default 5 seconds).
+
+Note: LOGGING_WINDOW_DURATION_S + UPLOAD_WINDOW_DURATION_S should be less than ACTIVE_WINDOW_DURATION_S. The main loop will run both windows and then sleep.
+
+Storage Method Justification (as requested)
+
+System: LittleFS
+
+Method: One JSON file per 1-hour session.
+
+Justification:
+
+Flash Wear Leveling: The primary concern with on-chip flash is write endurance. The specified alternative (logging every 5 seconds) would write to the disk 36 times per session. The implemented method buffers all 36 samples in RAM and performs only one write operation to flash at the end of the 3-minute logging window. This reduces flash wear by a factor of 36, dramatically increasing device longevity.
+
+Atomicity & Resilience: Storing each session as a complete, separate file (session_YYYYMMDD_HH.json) makes the data atomic. If the device loses power during a write, only one hour's data is corrupted, not the entire database.
+
+Simplicity: This flat-file approach is simpler to manage than a database like SQLite, which adds significant overhead.
+
+FIFO Management: A rolling buffer is easily achieved by listing all files, sorting them by name (which are chronological), and deleting the oldest (e.g., file[0]) when the count exceeds MAX_SESSIONS_STORED (24).
+
+Backlog Recovery Calculation
+
+Max Unsent Sessions: 24
+
+Upload Window per Wake: 4 minutes (240 seconds)
+
+Time per Upload (Est.): This is the key variable. A single HTTP POST (connect, send 30KB, get response, disconnect) can take 15-40 seconds, depending on cell signal.
+
+Worst-Case Scenario (40s per upload):
+
+Files that can be sent per window: 240 seconds / 40 seconds/file = 6 files
+
+Time to clear full backlog: 24 files / 6 files/window = 4 windows (4 hours)
+
+Best-Case Scenario (15s per upload):
+
+Files that can be sent per window: 240 seconds / 15 seconds/file = 16 files
+
+Time to clear full backlog: 24 files / 16 files/window = 2 windows (2 hours)
+
+Conclusion: The 4-minute upload window is sufficient to clear the 24-hour backlog in 2-4 wake cycles, assuming a stable connection.
