@@ -1,6 +1,6 @@
 # SSFT - 25-26 Projects
 
-This repository contains all of my projects for SSFT - 25-26.
+This repository contains all of my projects for the Aqua Guardian.
 
 ## 🚀 Projects
 
